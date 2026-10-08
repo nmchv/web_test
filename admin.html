@@ -1,0 +1,84 @@
+<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Админ</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--tx:#1d2330;--mut:#6b7280;--ac:#3b6cf6;--ok:#16a34a;--bad:#dc2626;--bd:#e3e6ee}
+@media(prefers-color-scheme:dark){:root{--bg:#12151c;--card:#1b202b;--tx:#e8ebf2;--mut:#9aa3b2;--bd:#2c3340}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,sans-serif}
+main{max-width:680px;margin:0 auto;padding:16px 14px 60px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+h1{font-size:22px;margin:14px 0 10px}h2{font-size:17px;margin:0 0 10px}
+input:not([type=checkbox]):not([type=radio]),select{width:100%;padding:10px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font-size:16px;margin-bottom:8px}
+button{background:var(--ac);color:#fff;border:0;border-radius:10px;padding:11px 16px;font-size:16px;cursor:pointer;width:100%;margin-top:8px}
+button.alt{background:var(--bd);color:var(--tx)}a{color:var(--ac)}
+label.opt{display:flex;gap:10px;align-items:center;padding:9px 12px;border:1px solid var(--bd);border-radius:10px;margin-bottom:8px;cursor:pointer}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between}.row input:not([type=checkbox]):not([type=radio]){margin:0}
+.ok{border-color:var(--ok)!important}.bad{border-color:var(--bad)!important}.mut{color:var(--mut);font-size:14px}.big{font-size:40px;font-weight:700}
+summary{cursor:pointer}.sc{overflow-x:auto}table{border-collapse:collapse;width:100%}td,th{padding:6px 8px;border-bottom:1px solid var(--bd);text-align:left}
+</style>
+</head><body><main>
+<div id="nav"></div><div id="box"></div></main>
+<script>
+const API="https://cloud.nmchv.ru/tests-api";
+const box=document.getElementById("box"),nav=document.getElementById("nav");
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let pw=sessionStorage.getItem("pw")||"",ed=null;
+const api=(p,o={})=>fetch(API+p,{...o,headers:{"Content-Type":"application/json","X-Admin":pw}}).then(r=>{if(!r.ok)throw r.status;return r.json()});
+const fmt=(it,v)=>it.type==="text"?((Array.isArray(v)?v[0]:v)||"—"):([].concat(v??[]).map(j=>it.options[j]).join(", ")||"—");
+const review=r=>r.items.map((it,i)=>`<div class="card ${it.right?"ok":"bad"}"><b>${i+1}. ${esc(it.q)}</b><br>${it.right?"✅":"❌"} Ответ: ${esc(fmt(it,it.given))}${it.right?"":"<br>Правильно: "+esc(fmt(it,it.correct))}</div>`).join("");
+
+function loginView(){
+  nav.innerHTML="";box.innerHTML='<h1>Админка</h1><div class="card"><input type="password" id="pw" placeholder="Пароль"><button id="go">Войти</button></div>';
+  document.getElementById("go").onclick=async()=>{pw=document.getElementById("pw").value;try{await api("/admin/ping");sessionStorage.setItem("pw",pw);tab("tests")}catch{alert("Неверный пароль или нет связи")}};
+}
+function tab(t){
+  nav.innerHTML=`<div class="row" style="margin-bottom:10px"><button class="${t==="tests"?"":"alt"}" onclick="tab('tests')">Тесты</button><button class="${t==="stats"?"":"alt"}" onclick="tab('stats')">Статистика</button></div>`;
+  (t==="tests"?testsView:statsView)().catch(()=>{box.innerHTML='<div class="card">Ошибка связи с сервером</div>'});
+}
+async function testsView(){
+  const l=await api("/tests");
+  box.innerHTML='<button onclick="edit()">+ Новый тест</button><br>'+l.map(t=>`<div class="card row"><span><b>${esc(t.title)}</b><br><span class="mut">?test=${esc(t.id)}</span></span><span><a href="#" onclick="edit('${t.id}');return false">Изменить</a> · <a href="#" onclick="del('${t.id}');return false">Удалить</a></span></div>`).join("")+'<p class="mut">Ссылка для учеников: tests.nmchv.ru/?test=ID</p>';
+}
+async function del(id){if(confirm("Удалить тест "+id+"? Результаты учеников сохранятся."))await api("/admin/tests/"+id,{method:"DELETE"}),tab("tests")}
+async function edit(id){
+  if(id){const t=await api("/admin/tests/"+id);ed={id,isNew:false,title:t.title,time:t.time||0,questions:t.questions.map(q=>({type:q.type,q:q.q,options:q.options||["",""],c:q.type==="text"?[]:[].concat(q.answer),t:q.type==="text"?q.answer.join("; "):""}))}}
+  else ed={id:"",isNew:true,title:"",time:0,questions:[]};
+  editor();
+}
+const tick=(i,j,on)=>{const q=ed.questions[i];q.c=q.type==="single"?[j]:on?[...q.c,j]:q.c.filter(x=>x!==j)};
+const rmOpt=(i,j)=>{const q=ed.questions[i];q.options.splice(j,1);q.c=q.c.filter(x=>x!==j).map(x=>x>j?x-1:x);editor()};
+function editor(){
+  box.innerHTML=`<div class="card"><input placeholder="ID (латиницей, напр. math1)" value="${esc(ed.id)}" ${ed.isNew?"":"disabled"} oninput="ed.id=this.value.trim()"><input placeholder="Название теста" value="${esc(ed.title)}" oninput="ed.title=this.value"><span class="mut">Время на тест, минут (0 — без ограничения)</span><input type="number" min="0" value="${ed.time||0}" oninput="ed.time=+this.value||0"></div>`+
+  ed.questions.map((q,i)=>`<div class="card"><div class="row"><select onchange="ed.questions[${i}].type=this.value;ed.questions[${i}].c=[];editor()">${[["single","Один ответ"],["multi","Несколько ответов"],["text","Ввод текста"]].map(([v,n])=>`<option value="${v}"${q.type===v?" selected":""}>${n}</option>`).join("")}</select><a href="#" onclick="ed.questions.splice(${i},1);editor();return false" style="margin-bottom:8px">✕</a></div>
+  <input placeholder="Вопрос" value="${esc(q.q)}" oninput="ed.questions[${i}].q=this.value">`+
+  (q.type==="text"?`<input placeholder="Верные ответы через ;" value="${esc(q.t)}" oninput="ed.questions[${i}].t=this.value">`:
+   q.options.map((o,j)=>`<div class="row" style="margin-bottom:8px"><input type="${q.type==="multi"?"checkbox":"radio"}" name="r${i}" ${q.c.includes(j)?"checked":""} onchange="tick(${i},${j},this.checked)"><input value="${esc(o)}" placeholder="Вариант ${j+1}" oninput="ed.questions[${i}].options[${j}]=this.value"><a href="#" onclick="rmOpt(${i},${j});return false">✕</a></div>`).join("")+
+   `<a href="#" onclick="ed.questions[${i}].options.push('');editor();return false">+ вариант</a> <span class="mut">(отметьте верные)</span>`)+"</div>").join("")+
+  `<button class="alt" onclick="ed.questions.push({type:'single',q:'',options:['',''],c:[],t:''});editor()">+ Вопрос</button><button onclick="save()">Сохранить</button><button class="alt" onclick="tab('tests')">Отмена</button>`;
+}
+async function save(){
+  if(!/^[\w-]{1,40}$/.test(ed.id))return alert("ID: только латиница, цифры, - и _");
+  if(!ed.title.trim()||!ed.questions.length)return alert("Нужны название и хотя бы один вопрос");
+  const qs=[];
+  for(const [i,q] of ed.questions.entries()){
+    if(!q.q.trim())return alert("Пустой вопрос №"+(i+1));
+    if(q.type==="text"){const a=q.t.split(";").map(s=>s.trim()).filter(Boolean);if(!a.length)return alert("Нет верных ответов в вопросе №"+(i+1));qs.push({type:"text",q:q.q,answer:a})}
+    else{if(q.options.length<2||q.options.some(o=>!o.trim()))return alert("Заполните все варианты в вопросе №"+(i+1));if(!q.c.length)return alert("Отметьте верный ответ в вопросе №"+(i+1));
+      qs.push({type:q.type,q:q.q,options:q.options,answer:q.type==="single"?q.c[0]:q.c.slice().sort()})}
+  }
+  try{await api("/admin/tests/"+ed.id,{method:"PUT",body:JSON.stringify({title:ed.title.trim(),time:ed.time||0,questions:qs})});tab("tests")}catch{alert("Не удалось сохранить")}
+}
+async function statsView(){
+  const all=(await api("/admin/results")).sort((a,b)=>b.date.localeCompare(a.date));
+  const grp=k=>{const m={};all.forEach(r=>(m[r[k]]=m[r[k]]||[]).push(r));return Object.entries(m).map(([n,a])=>`<tr><td>${esc(n)}</td><td>${a.length}</td><td>${Math.round(a.reduce((s,r)=>s+r.score/r.total,0)/a.length*100)}%</td></tr>`).join("")};
+  box.innerHTML=`<h2>По ученикам</h2><div class="sc card"><table><tr><th>Логин</th><th>Попыток</th><th>Средний</th></tr>${grp("login")}</table></div>
+  <h2>По тестам</h2><div class="sc card"><table><tr><th>Тест</th><th>Попыток</th><th>Средний</th></tr>${grp("title")}</table></div>
+  <h2>Все попытки (${all.length})</h2><button class="alt" id="csv">Скачать CSV</button><input id="f" style="margin-top:8px" placeholder="Фильтр по логину или тесту"><div id="lst"></div>`;
+  const draw=()=>{const f=document.getElementById("f").value.toLowerCase();document.getElementById("lst").innerHTML=all.filter(r=>(r.login+" "+r.title).toLowerCase().includes(f)).slice(0,100).map(r=>`<details class="card"><summary><b>${esc(r.login)}</b> · ${esc(r.title)} — ${r.score}/${r.total} <span class="mut">${new Date(r.date).toLocaleString("ru")}</span></summary><br>${review(r)}</details>`).join("")};
+  document.getElementById("f").oninput=draw;draw();
+  document.getElementById("csv").onclick=()=>{
+    const q=s=>'"'+String(s).replace(/"/g,'""')+'"';
+    const rows=[["Дата","Логин","Тест","Баллы","Всего","Процент"],...all.map(r=>[new Date(r.date).toLocaleString("ru"),r.login,r.title,r.score,r.total,Math.round(r.score/r.total*100)])];
+    const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+rows.map(r=>r.map(q).join(";")).join("\r\n")],{type:"text/csv"}));a.download="results.csv";a.click();
+  };
+}
+pw?api("/admin/ping").then(()=>tab("tests")).catch(loginView):loginView();
+</script></body></html>
